@@ -100,3 +100,13 @@ ENV/
 
 # mkdocs documentation
 /site
+*.align
+*.align
+evaluation/samples/swwp2s.align
+training/unseen_speakers/datasets.cache
+evaluation/samples/swwp2s.align
+training/unseen_speakers/datasets/train/s3
+training/unseen_speakers/datasets/val/s2
+evaluation/samples/swwp2s.align
+*.csv
+*.DESKTOP-GJN0TLH
