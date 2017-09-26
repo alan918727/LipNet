@@ -23,13 +23,20 @@ def untokenize(words):
 # Source: https://stackoverflow.com/questions/367155/splitting-a-string-into-words-and-punctuation
 def tokenize(text):
     return re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
+    
+    
+a=tokenize('this is the')
+b=untokenize(a)
+
 
 # Source: http://norvig.com/spell-correct.html (with some modifications)
 class Spell(object):
     def __init__(self, path):
+        # the counter function to count all words in the PREDICT_DICT PATH
         self.dictionary = Counter(list(string.punctuation) + self.words(open(path).read()))
 
     def words(self, text):
+        #lowercase all word
         return re.findall(r'\w+', text.lower())
 
     def P(self, word, N=None):
@@ -49,7 +56,7 @@ class Spell(object):
     def known(self, words):
         "The subset of `words` that appear in the dictionary of WORDS."
         return set(w for w in words if w in self.dictionary)
-
+#
     def edits1(self, word):
         "All edits that are one edit away from `word`."
         letters    = 'abcdefghijklmnopqrstuvwxyz'
@@ -64,10 +71,10 @@ class Spell(object):
         "All edits that are two edits away from `word`."
         return (e2 for e1 in self.edits1(word) for e2 in self.edits1(e1))
 
-    # Correct words
+    #Correct words
     def corrections(self, words):
         return [self.correction(word) for word in words]
 
-    # Correct sentence
+    #Correct sentence
     def sentence(self, sentence):
         return untokenize(self.corrections(tokenize(sentence)))

@@ -104,7 +104,7 @@ class VideoAugmenter(object):
 
 
 class Video(object):
-    def __init__(self, vtype='mouth', face_predictor_path=None):
+    def __init__(self, vtype='face', face_predictor_path=None):
         if vtype == 'face' and face_predictor_path is None:
             raise AttributeError('Face video need to be accompanied with face predictor')
         self.face_predictor_path = face_predictor_path
@@ -209,3 +209,9 @@ class Video(object):
             data_frames = np.rollaxis(data_frames, 3) # C x T x W x H
         self.data = data_frames
         self.length = frames_n
+#main
+#
+## this is to read all the images from the folder and save as numpy data
+#path='D:/GitHub/LipNet/training/unseen_speakers/datasets/train/s3/bbaf1s'
+#frames_path = sorted([os.path.join(path, x) for x in os.listdir(path)])
+#frames = [ndimage.imread(frame_path) for frame_path in frames_path]

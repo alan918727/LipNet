@@ -4,6 +4,7 @@ from lipnet.lipreading.aligns import Align
 from lipnet.helpers.threadsafe import threadsafe_generator
 from lipnet.helpers.list import get_list_safe
 from keras import backend as K
+
 import numpy as np
 import keras
 import pickle
@@ -29,8 +30,11 @@ class BasicGenerator(keras.callbacks.Callback):
         self.cur_val_index   = multiprocessing.Value('i', 0)
         self.curriculum      = kwargs.get('curriculum', None)
         self.random_seed     = kwargs.get('random_seed', 13)
+        
+        #vtype should be mouth if it is already cropped.
+        
         self.vtype               = kwargs.get('vtype', 'mouth')
-        self.face_predictor_path = kwargs.get('face_predictor_path', None)
+        self.face_predictor_path = kwargs.get('face_predictor_path','D:/GitHub/LipNet/common/predictors/shape_predictor_68_face_landmarks.dat')
         self.steps_per_epoch     = kwargs.get('steps_per_epoch', None)
         self.validation_steps    = kwargs.get('validation_steps', None)
         # Process epoch is used by non-training generator (e.g: validation)
@@ -48,6 +52,8 @@ class BasicGenerator(keras.callbacks.Callback):
         self.process_val_index   = -1
 
     def build(self, **kwargs):
+        # create path attribute and build dataset
+        #test self.train_path     = os.path.join(self.dataset_path, 'test')
         self.train_path     = os.path.join(self.dataset_path, 'train')
         self.val_path       = os.path.join(self.dataset_path, 'val')
         self.align_path     = os.path.join(self.dataset_path, 'align')
@@ -59,10 +65,12 @@ class BasicGenerator(keras.callbacks.Callback):
 
     @property
     def training_size(self):
+        #train_list is the video file in the datasets
         return len(self.train_list)
 
     @property
     def default_training_steps(self):
+        
         return self.training_size / self.minibatch_size
 
     @property
@@ -77,12 +85,16 @@ class BasicGenerator(keras.callbacks.Callback):
         return 28
 
     def get_cache_path(self):
-        return self.dataset_path.rstrip('/') + '.cache'
+        #rstrip \\ is to delete the '\\' at the end of path from right
+        return self.dataset_path.rstrip('\\') + '.cache'
 
+# import all video data into training
     def enumerate_videos(self, path):
         video_list = []
         for video_path in glob.glob(path):
             try:
+                #if it is video then use from_video handle type
+                #else frames
                 if os.path.isfile(video_path):
                     video = Video(self.vtype, self.face_predictor_path).from_video(video_path)
                 else:
@@ -108,10 +120,12 @@ class BasicGenerator(keras.callbacks.Callback):
         for video_path in video_list:
             video_id = os.path.splitext(video_path)[0].split("\\")[-1]
             align_path = os.path.join(self.align_path, video_id)+".align"
+            # this means the align_hash got the self attribute in Align, which are aligns, sentence,label and padded_label
             align_hash[video_id] = Align(self.absolute_max_string_len, text_to_labels).from_file(align_path)
         return align_hash
 
     def build_dataset(self):
+        # this is to scan how many videos in the folder
         if os.path.isfile(self.get_cache_path()):
             print ("\nLoading dataset list from cache...")
             with open (self.get_cache_path(), 'rb') as fp:
@@ -120,20 +134,23 @@ class BasicGenerator(keras.callbacks.Callback):
             print ("\nEnumerating dataset list from disk...")
             self.train_list = self.enumerate_videos(os.path.join(self.train_path, '*', '*'))
             self.val_list   = self.enumerate_videos(os.path.join(self.val_path, '*', '*'))
+            #hash align dictionary for val and train,
+            #the align has has several attribute return by Align,e.g. align,sentence,label,padded_label etc.
             self.align_hash = self.enumerate_align_hash(self.train_list + self.val_list)
             with open(self.get_cache_path(), 'wb') as fp:
                 pickle.dump((self.train_list, self.val_list, self.align_hash), fp)
 
         print ("Found {} videos for training.".format(self.training_size))
         print ("Found {} videos for validation.".format(self.validation_size))
-        print ("")
-
+        print ("")   
         np.random.shuffle(self.train_list)
 
     def get_align(self, _id):
         return self.align_hash[_id]
 
+## training batch!
     def get_batch(self, index, size, train):
+        #if train is True, do the training
         if train:
             video_list = self.train_list
         else:
@@ -145,17 +162,26 @@ class BasicGenerator(keras.callbacks.Callback):
         label_length = []
         input_length = []
         source_str = []
+        #add the face predictor here to test
+
         for path in X_data_path:
-            video = Video().from_frames(path)
-            align = self.get_align(path.split('/')[-1])
+            video = Video(face_predictor_path=self.face_predictor_path).from_frames(path)
+            #change / to \\
+            align = self.get_align(path.split('\\')[-1])
+#            print('align:',path.split('\\')[-1])
             video_unpadded_length = video.length
-            if self.curriculum is not None:
-                video, align, video_unpadded_length = self.curriculum.apply(video, align)
+            # ignore the curriculum!
+            
+#            if self.curriculum is not None:
+#                video, align, video_unpadded_length = self.curriculum.apply(video, align)
+                #X is the video data, Y is the align padded label
             X_data.append(video.data)
             Y_data.append(align.padded_label)
             label_length.append(align.label_length) # CHANGED [A] -> A, CHECK!
             # input_length.append([video_unpadded_length - 2]) # 2 first frame discarded
             input_length.append(video.length) # Just use the video padded length to avoid CTC No path found error (v_len < a_len)
+            
+            #align.sentence is the sentence output attribute of align
             source_str.append(align.sentence) # CHANGED [A] -> A, CHECK!
 
         source_str = np.array(source_str)
@@ -171,25 +197,29 @@ class BasicGenerator(keras.callbacks.Callback):
                   'source_str': source_str  # used for visualization only
                   }
         outputs = {'ctc': np.zeros([size])}  # dummy data for dummy loss function
+#dummy outputs return
+#return the tuple data X_data to test
+        return inputs,outputs
 
-        return (inputs, outputs)
 
-    @threadsafe_generator
+
+#    @threadsafe_generator
     def next_train(self):
         r = np.random.RandomState(self.random_seed)
         while 1:
-            # print "SI: {}, SE: {}".format(self.cur_train_index.value, self.shared_train_epoch.value)
+            print ("SI: {}, SE: {}".format(self.cur_train_index.value, self.shared_train_epoch.value))
             with self.cur_train_index.get_lock(), self.shared_train_epoch.get_lock():
                 cur_train_index = self.cur_train_index.value
                 self.cur_train_index.value += self.minibatch_size
                 # Shared epoch increment on start or index >= training in epoch
                 if cur_train_index >= self.steps_per_epoch * self.minibatch_size:
                     cur_train_index = 0
+                    # go to next epoch
                     self.shared_train_epoch.value += 1
                     self.cur_train_index.value = self.minibatch_size
                 if self.shared_train_epoch.value < 0:
                     self.shared_train_epoch.value += 1
-                # Shared index overflow
+                # Shared index overflow then use modulo to the next epoch index
                 if self.cur_train_index.value >= self.training_size:
                     self.cur_train_index.value = self.cur_train_index.value % self.minibatch_size
                 # Calculate differences between process and shared epoch
@@ -198,11 +228,13 @@ class BasicGenerator(keras.callbacks.Callback):
                 self.process_train_epoch += epoch_differences
                 for i in range(epoch_differences):
                     r.shuffle(self.train_list) # Catch up
-                # print "GENERATOR EPOCH {}".format(self.process_train_epoch)
-                # print self.train_list[0]
-            # print "PI: {}, SI: {}, SE: {}".format(cur_train_index, self.cur_train_index.value, self.shared_train_epoch.value)
-            if self.curriculum is not None and self.curriculum.epoch != self.process_train_epoch:
-                self.update_curriculum(self.process_train_epoch, train=True)
+                print ("GENERATOR EPOCH {}".format(self.process_train_epoch))
+                print (self.train_list[0])
+            print ("PI: {}, SI: {}, SE: {}".format(cur_train_index, self.cur_train_index.value, self.shared_train_epoch.value))
+            #ignore the curriculum first
+            
+#            if self.curriculum is not None and self.curriculum.epoch != self.process_train_epoch:
+#                self.update_curriculum(self.process_train_epoch, train=True)
             # print "Train [{},{}] {}:{}".format(self.process_train_epoch, epoch_differences, cur_train_index,cur_train_index+self.minibatch_size)
             ret = self.get_batch(cur_train_index, self.minibatch_size, train=True)
             # if epoch_differences > 0:
@@ -211,7 +243,7 @@ class BasicGenerator(keras.callbacks.Callback):
             #     print "-------------------"
             yield ret
 
-    @threadsafe_generator
+#    @threadsafe_generator
     def next_val(self):
         while 1:
             with self.cur_val_index.get_lock():
@@ -219,9 +251,12 @@ class BasicGenerator(keras.callbacks.Callback):
                 self.cur_val_index.value += self.minibatch_size
                 if self.cur_val_index.value >= self.validation_size:
                     self.cur_val_index.value = self.cur_val_index.value % self.minibatch_size
-            if self.curriculum is not None and self.curriculum.epoch != self.process_epoch:
-                self.update_curriculum(self.process_epoch, train=False)
-            # print "Val [{}] {}:{}".format(self.process_epoch, cur_val_index,cur_val_index+self.minibatch_size)
+                    
+                    #ignore the curriculum
+#            if self.curriculum is not None and self.curriculum.epoch != self.process_epoch:
+#                self.update_curriculum(self.process_epoch, train=False)
+
+            print ("Val [{}] {}:{}".format(self.process_epoch, cur_val_index,cur_val_index+self.minibatch_size))
             ret = self.get_batch(cur_val_index, self.minibatch_size, train=False)
             yield ret
 
@@ -234,44 +269,49 @@ class BasicGenerator(keras.callbacks.Callback):
     def on_epoch_begin(self, epoch, logs={}):
         self.process_epoch = epoch
 
-    def update_curriculum(self, epoch, train=True):
-        self.curriculum.update(epoch, train=train)
-        print ("Epoch {}: {}".format(epoch, self.curriculum))
-
+        #ignore the curriculum
+#    def update_curriculum(self, epoch, train=True):
+#        self.curriculum.update(epoch, train=train)
+#        print ("Epoch {}: {}".format(epoch, self.curriculum))
+#
 
 # datasets/video/<sid>/<id>/<image>.png
 # or datasets/[train|val]/<sid>/<id>.mpg
 # datasets/align/<id>.align
-class RandomSplitGenerator(BasicGenerator):
-    def build(self, **kwargs):
-        self.video_path = os.path.join(self.dataset_path, 'video')
-        self.align_path = os.path.join(self.dataset_path, 'align')
-        self.val_split = kwargs.get('val_split', 0.2)
-        self.build_dataset()
-        # Set steps to dataset size if not set
-        self.steps_per_epoch  = self.default_training_steps if self.steps_per_epoch is None else self.steps_per_epoch
-        self.validation_steps = self.default_validation_steps if self.validation_steps is None else self.validation_steps
-        return self
-        
-    def build_dataset(self):
-        if os.path.isfile(self.get_cache_path()):
-            print ("\nLoading dataset list from cache...")
-            with open (self.get_cache_path(), 'rb') as fp:
-                self.train_list, self.val_list, self.align_hash = pickle.load(fp)
-        else:
-            print ("\nEnumerating dataset list from disk...")
-            video_list = self.enumerate_videos(os.path.join(self.video_path, '*', '*'))
-            np.random.shuffle(video_list) # Random the video list before splitting
-            if(self.val_split > 1): # If val_split is not a probability
-                training_size = len(video_list) - self.val_split
-            else: # If val_split is a probability
-                training_size = len(video_list) - int(self.val_split * len(video_list))
-            self.train_list = video_list[0:training_size]
-            self.val_list   = video_list[training_size:]
-            self.align_hash = self.enumerate_align_hash(self.train_list + self.val_list)
-            with open(self.get_cache_path(), 'wb') as fp:
-                pickle.dump((self.train_list, self.val_list, self.align_hash), fp)
-
-        print ("Found {} videos for training.".format(self.training_size))
-        print ("Found {} videos for validation.".format(self.validation_size))
-        print ("")
+#class RandomSplitGenerator(BasicGenerator):
+#    def build(self, **kwargs):
+#        self.video_path = os.path.join(self.dataset_path, 'video')
+#        self.align_path = os.path.join(self.dataset_path, 'align')
+#        self.val_split = kwargs.get('val_split', 0.2)
+#        #build the dataset, scan for the videos
+#        self.build_dataset()
+#        # Set steps to dataset size if not set
+#        self.steps_per_epoch  = self.default_training_steps if self.steps_per_epoch is None else self.steps_per_epoch
+#        self.validation_steps = self.default_validation_steps if self.validation_steps is None else self.validation_steps
+#        return self
+#        
+#    def build_dataset(self):
+#        # this is to scan how many videos in the folder
+#        if os.path.isfile(self.get_cache_path()):
+#            print ("\nLoading dataset list from cache...")
+#            with open (self.get_cache_path(), 'rb') as fp:
+#                self.train_list, self.val_list, self.align_hash = pickle.load(fp)
+#        else:
+#            print ("\nEnumerating dataset list from disk...")
+#            video_list = self.enumerate_videos(os.path.join(self.video_path, '*', '*'))
+#            np.random.shuffle(video_list) # Random the video list before splitting
+#            if(self.val_split > 1): # If val_split is not a probability
+#                training_size = len(video_list) - self.val_split
+#            else: # If val_split is a probability
+#                training_size = len(video_list) - int(self.val_split * len(video_list))
+#            self.train_list = video_list[0:training_size]
+#            self.val_list   = video_list[training_size:]
+#            self.align_hash = self.enumerate_align_hash(self.train_list + self.val_list)
+#            with open(self.get_cache_path(), 'wb') as fp:
+#                pickle.dump((self.train_list, self.val_list, self.align_hash), fp)
+#
+#        print ("Found {} videos for training.".format(self.training_size))
+#        print ("Found {} videos for validation.".format(self.validation_size))
+#        print ("")
+#        
+#

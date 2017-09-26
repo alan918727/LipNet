@@ -1,15 +1,25 @@
 from keras.layers.convolutional import Conv3D, ZeroPadding3D
 from keras.layers.pooling import MaxPooling3D
-from keras.layers.core import Dense, Activation, SpatialDropout3D, Flatten
+from keras.layers.core import Dense, Activation, SpatialDropout3D, Flatten,Lambda
 from keras.layers.wrappers import Bidirectional, TimeDistributed
 from keras.layers.recurrent import GRU
 from keras.layers.normalization import BatchNormalization
 from keras.layers import Input
 from keras.models import Model
-from lipnet.core.layers import CTC
 from keras import backend as K
 
-
+def ctc_lambda_func(args):
+        y_pred, labels, input_length, label_length = args
+        # From Keras example image_ocr.py:
+        # the 2 is critical here since the first couple outputs of the RNN
+        # tend to be garbage:
+        # y_pred = y_pred[:, 2:, :]
+        y_pred = y_pred[:, :, :]
+        return K.ctc_batch_cost(labels, y_pred, input_length, label_length)    
+        
+def CTC(name, args):
+        return Lambda(ctc_lambda_func, output_shape=(1,), name=name)(args)
+        
 class LipNet(object):
     def __init__(self, img_c=3, img_w=100, img_h=50, frames_n=75, absolute_max_string_len=32, output_size=28):
         self.img_c = img_c
@@ -48,13 +58,14 @@ class LipNet(object):
         self.actv3 = Activation('relu', name='actv3')(self.batc3)
         self.drop3 = SpatialDropout3D(0.5)(self.actv3)
         self.maxp3 = MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2), name='max3')(self.drop3)
-
+#time dense, flatten the CNN output
         self.resh1 = TimeDistributed(Flatten())(self.maxp3)
 
+        #Bi-RNN 256 rnn_size, orthogonal initializer
         self.gru_1 = Bidirectional(GRU(256, return_sequences=True, kernel_initializer='Orthogonal', name='gru1'), merge_mode='concat')(self.resh1)
         self.gru_2 = Bidirectional(GRU(256, return_sequences=True, kernel_initializer='Orthogonal', name='gru2'), merge_mode='concat')(self.gru_1)
 
-        # transforms RNN output to character activations:
+        # transforms RNN output to dense size=28,outputsize is the number of phoneme
         self.dense1 = Dense(self.output_size, kernel_initializer='he_normal', name='dense1')(self.gru_2)
 
         self.y_pred = Activation('softmax', name='softmax')(self.dense1)
@@ -62,8 +73,12 @@ class LipNet(object):
         self.labels = Input(name='the_labels', shape=[self.absolute_max_string_len], dtype='float32')
         self.input_length = Input(name='input_length', shape=[1], dtype='int64')
         self.label_length = Input(name='label_length', shape=[1], dtype='int64')
-
+        
+    # Keras doesn't currently support loss funcs with extra parameters
+    # so CTC loss is implemented in a lambda layer
         self.loss_out = CTC('ctc', [self.y_pred, self.labels, self.input_length, self.label_length])
+        
+        #this model requires 4 inputs and 1 output loss out
 
         self.model = Model(inputs=[self.input_data, self.labels, self.input_length, self.label_length], outputs=self.loss_out)
 
@@ -72,6 +87,7 @@ class LipNet(object):
 
     def predict(self, input_batch):
         return self.test_function([input_batch, 0])[0]  # the first 0 indicates test
+            
 
     @property
     def test_function(self):

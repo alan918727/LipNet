@@ -66,7 +66,8 @@ def train(run_name, start_epoch, stop_epoch, img_c, img_w, img_h, frames_n, abso
                         verbose=1,
                         max_q_size=5,
                         workers=2,
-                        pickle_safe=True)
+                        pickle_safe=True
+                            )
 
 if __name__ == '__main__':
     run_name = datetime.datetime.now().strftime('%Y%m%d%H%M%S')

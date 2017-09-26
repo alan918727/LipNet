@@ -18,7 +18,9 @@ CURRENT_PATH = os.path.dirname(os.path.abspath(__file__))
 
 PREDICT_GREEDY      = False
 PREDICT_BEAM_WIDTH  = 200
+#dict
 PREDICT_DICTIONARY  = os.path.join(CURRENT_PATH,'..','..','common','dictionaries','grid.txt')
+
 
 def curriculum_rules(epoch):
     return { 'sentence_length': -1, 'flip_probability': 0.5, 'jitter_probability': 0.05 }
